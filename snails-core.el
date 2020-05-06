@@ -187,13 +187,6 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(defvar snails-use-exec-path-from-shell t)
-
-(when (and snails-use-exec-path-from-shell
-           (featurep 'cocoa))
-  (require 'exec-path-from-shell)
-  (exec-path-from-shell-initialize))
-
 ;;; Code:
 
 (defcustom snails-mode-hook '()
