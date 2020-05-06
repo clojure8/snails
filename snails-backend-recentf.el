@@ -98,11 +98,14 @@
        (when (or
               (string-equal input "")
               (snails-match-input-p input file))
-         (snails-add-candiate 'candidates (snails-wrap-file-icon file) file)))
-     (snails-sort-candidates input candidates 1 1)
-     candidates))
+         (snails-add-candiate 'candidates file file)))
+     (snails-sort-candidates input candidates 1 1)))
 
- :candiate-do
+ :candidate-icon
+ (lambda (candidate)
+   (snails-render-file-icon candidate))
+
+ :candidate-do
  (lambda (candidate)
    (find-file candidate)))
 

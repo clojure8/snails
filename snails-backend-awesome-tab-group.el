@@ -97,10 +97,9 @@
                 (string-equal input "")
                 (snails-match-input-p input group))
            (snails-add-candiate 'candidates group group))))
-     (snails-sort-candidates input candidates 0 0)
-     candidates))
+     (snails-sort-candidates input candidates 0 0)))
 
- :candiate-do
+ :candidate-do  
  (lambda (candidate)
    (awesome-tab-switch-group candidate)))
 

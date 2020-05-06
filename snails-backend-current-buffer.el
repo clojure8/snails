@@ -92,8 +92,14 @@
  (lambda (input)
    (let ((buffer-filename (buffer-file-name snails-start-buffer)))
      (when (and (executable-find "rg")
-                (> (length input) 5)
+                (> (length input) 3)
                 buffer-filename)
+       (setq input (replace-regexp-in-string " " ".*" input))
+
+       (when (memq system-type '(cygwin windows-nt ms-dos))
+         (setq input (encode-coding-string input locale-coding-system))
+         (setq buffer-filename (encode-coding-string buffer-filename locale-coding-system)))
+
        (list "rg" "--no-heading" "--column" "--color" "never" "--max-columns" "300" input buffer-filename)
        )))
 
@@ -110,7 +116,7 @@
           candidate)))
      candidates))
 
- :candiate-do
+ :candidate-do
  (lambda (candidate)
    (let ((file-info (split-string candidate ":")))
      (when (> (length file-info) 2)

@@ -93,7 +93,7 @@
  (lambda (input)
    (when (and (ignore-errors (require 'eaf))
               (executable-find "fzf")
-              (> (length input) 3))
+              (> (length input) 1))
      (list (concat (file-name-directory (locate-library "snails")) "fzf-search.sh")
            (concat eaf-config-location (file-name-as-directory "browser") (file-name-as-directory "history") "log.txt")
            input)))
@@ -101,25 +101,25 @@
  :candidate-filter
  (lambda (candidate-list)
    (let ((candidate-index 1)
-         (format-string (concat (format "%%%sd" (+ (/ snails-backend-eaf-browser-history-limit 10) 1)) " %s %s"))
          candidates)
      (catch 'exceed-the-limit
        (dolist (candidate candidate-list)
          (when (string-match "^\\(.+\\)ᛝ\\(.+\\)ᛡ\\(.+\\)$" candidate)
            (snails-add-candiate 'candidates
-                                (format format-string candidate-index (match-string 1 candidate) (match-string 2 candidate))
+                                (format "%s %s" (match-string 1 candidate) (match-string 2 candidate))
                                 (match-string 2 candidate))
            (setq candidate-index (+ candidate-index 1))
            (when (> candidate-index snails-backend-eaf-browser-history-limit)
              (throw 'exceed-the-limit nil)))))
      candidates))
 
- :candiate-do
+ :candidate-icon
  (lambda (candidate)
-   (with-temp-buffer
-     (insert candidate)
-     (beginning-of-buffer)
-     (eaf-open-browser candidate))))
+   (snails-render-web-icon))
+
+ :candidate-do
+ (lambda (candidate)
+   (eaf-open-browser candidate)))
 
 (provide 'snails-backend-eaf-browser-history)
 

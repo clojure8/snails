@@ -97,10 +97,9 @@
               (string-equal input "")
               (snails-match-input-p input bookmark))
          (snails-add-candiate 'candidates bookmark bookmark)))
-     (snails-sort-candidates input candidates 0 0)
-     candidates))
+     (snails-sort-candidates input candidates 0 0)))
 
- :candiate-do
+ :candidate-do
  (lambda (candidate)
    (bookmark-jump candidate)))
 

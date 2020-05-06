@@ -7,8 +7,8 @@
 ;; Maintainer: Andy Stewart <lazycat.manatee@gmail.com>
 ;; Copyright (C) 2019, Andy Stewart, all rights reserved.
 ;; Created: 2019-05-16 21:26:09
-;; Version: 6.9
-;; Last-Updated: 2020-02-27 20:03:37
+;; Version: 7.2
+;; Last-Updated: 2020-03-30 21:26:44
 ;;           By: Andy Stewart
 ;; URL: http://www.emacswiki.org/emacs/download/snails-core.el
 ;; Keywords:
@@ -67,6 +67,15 @@
 ;;
 
 ;;; Change log:
+;;
+;; 2020/03/30
+;;      * Add `snails-focus-init-frame' fix Mac focus problem.
+;;
+;; 2020/03/28
+;;      * Remap `hl-line' color with `snails-input-buffer-face', avoid two colors in input backgorund.
+;;
+;; 2020/03/21
+;;      * Make snails follow Emacs theme.
 ;;
 ;; 2020/02/27
 ;;      * Don't delete snails frame to improve performance.
@@ -218,6 +227,31 @@
   :type 'cons
   :group 'snails)
 
+(defcustom snails-input-buffer-text-scale 1.25
+  "The font scale of input buffer."
+  :type 'float
+  :group 'snails)
+
+(defcustom snails-need-render-candidate-icon t
+  "If non nil try render candidate icon."
+  :type 'boolean
+  :group 'snails)
+
+(defcustom snails-default-show-prefix-tips t
+  "If non nil show prefix tips buffer when showing snails-frame."
+  :type 'boolean
+  :group 'snails)
+
+(defcustom snails-input-buffer-window-min-height 1
+  "The minimum window height of input buffer."
+  :type 'integer
+  :type 'snails)
+
+(defcustom snails-tips-buffer-window-min-height 2
+  "The minimum window height of tips buffer."
+  :type 'integer
+  :type 'snails)
+
 (defface snails-header-line-face
   '((t (:inherit font-lock-function-name-face :underline t :height 1.3)))
   "Face for header line"
@@ -237,7 +271,7 @@ need to set face attribute, such as foreground and background."
   :group 'snails)
 
 (defface snails-select-line-face
-  '((t (:inherit region)))
+  '((t))
   "Face for select line."
   :group 'snails)
 
@@ -247,13 +281,8 @@ need to set face attribute, such as foreground and background."
   :group 'snails)
 
 (defface snails-content-buffer-face
-  '((t (:height 130)))
+  '((t (:height 140)))
   "Face for content area."
-  :group 'snails)
-
-(defface snails-copy-candidate-face
-  '((t (:foreground "Gold" :bold t)))
-  "Face copy candidate."
   :group 'snails)
 
 (defface snails-tips-prefix-key-face
@@ -262,9 +291,12 @@ need to set face attribute, such as foreground and background."
   :group 'snails)
 
 (defface snails-tips-prefix-backend-face
-  '((t (:inherit font-lock-comment-face)))
+  '((t (:height 140)))
   "Face for tips backend name."
   :group 'snails)
+
+(defvar snails-init-frame nil
+  "The frame before snails start, use for focus after snails hide.")
 
 (defvar snails-input-buffer " *snails input*"
   "The buffer name of search input buffer.")
@@ -280,6 +312,9 @@ need to set face attribute, such as foreground and background."
 
 (defvar snails-start-buffer nil
   "The buffer before snails start.")
+
+(defvar snails-start-buffer-dir-path nil
+  "The `default-directory' value of the buffer before snails start")
 
 (defvar snails-start-buffer-lines nil
   "The line number of start buffer.")
@@ -329,6 +364,9 @@ If `fuz' library has load, set with `load'.")
 (defvar snails-select-candidate-offset nil
   "Record candidate offset of selected candidate.")
 
+(defvar snails-frame-window-conf nil
+  "Record snails frame window configuration.")
+
 (defvar snails-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-g") 'snails-quit)
@@ -338,12 +376,15 @@ If `fuz' library has load, set with `load'.")
     (define-key map (kbd "C-p") 'snails-select-prev-item)
     (define-key map (kbd "M-n") 'snails-select-next-item)
     (define-key map (kbd "M-p") 'snails-select-prev-item)
+    (define-key map (kbd "M-,") 'snails-select-next-item)
+    (define-key map (kbd "M-.") 'snails-select-prev-item)
     (define-key map (kbd "C-v") 'snails-select-next-backend)
     (define-key map (kbd "M-v") 'snails-select-prev-backend)
     (define-key map (kbd "M-j") 'snails-select-next-backend)
     (define-key map (kbd "M-k") 'snails-select-prev-backend)
     (define-key map (kbd "C-m") 'snails-candidate-do)
     (define-key map (kbd "RET") 'snails-candidate-do)
+    (define-key map (kbd "C-?") 'snails-toggle-prefix-tips-buffer)
     map)
   "Keymap used by `snails-mode'.")
 
@@ -378,6 +419,7 @@ or set it with any string you want."
 
         ;; Record buffer before start snails.
         (setq snails-start-buffer (current-buffer))
+        (setq snails-start-buffer-dir-path default-directory)
         (setq snails-start-buffer-lines (line-number-at-pos (point-max)))
 
         ;; Init face with theme.
@@ -396,6 +438,8 @@ or set it with any string you want."
          ;; Search with customize string when `search-object' is string.
          ((and (stringp search-object)
                (not (string-empty-p search-object)))
+          (with-current-buffer snails-input-buffer
+            (insert search-object))
           (snails-search search-object))
          ;; Search symbol around point when `search-object' is t.
          (search-object
@@ -458,10 +502,17 @@ or set it with any string you want."
   "Confirm current candidate."
   (interactive)
   (let ((candidate-info (snails-candidate-get-info)))
-    (when candidate-info
-      (snails-backend-do
-       (nth 0 candidate-info)
-       (nth 1 candidate-info)))))
+    (if candidate-info
+        (snails-backend-do (nth 0 candidate-info) (nth 1 candidate-info))
+      (message "Nothing selected."))))
+
+(defun snails-kill ()
+  (interactive)
+  (delete-frame snails-frame t)
+  (setq snails-frame nil)
+
+  ;; Focus init frame.
+  (snails-focus-init-frame))
 
 (defun snails-quit ()
   "Quit snails."
@@ -470,6 +521,7 @@ or set it with any string you want."
   (make-frame-invisible snails-frame)
   (setq snails-project-root-dir nil)
   (setq snails-start-buffer nil)
+  (setq snails-start-buffer-dir-path nil)
   (setq snails-select-line-overlay nil)
   (setq snails-need-render nil)
   (setq snails-select-backend-name nil)
@@ -483,7 +535,15 @@ or set it with any string you want."
      (when (and process
                 (process-live-p process))
        (kill-process process)))
-   snails-backend-subprocess-hash))
+   snails-backend-subprocess-hash)
+
+  ;; Focus init frame.
+  (snails-focus-init-frame))
+
+(defun snails-focus-init-frame ()
+  (when snails-init-frame
+    (select-frame snails-init-frame)
+    ))
 
 (defun snails-create-input-buffer ()
   "Create input buffer."
@@ -495,10 +555,15 @@ or set it with any string you want."
     (run-hooks 'snails-mode-hook)
     ;; Set input buffer face.
     (buffer-face-set 'snails-input-buffer-face)
+    ;; Increate input buffer size, this need set for Emacs 28.
+    (text-scale-increase snails-input-buffer-text-scale)
+    ;; Remap `hl-line' color with `snails-input-buffer-face', avoid two colors in input backgorund.
+    (face-remap-add-relative 'hl-line :background (face-background 'snails-input-buffer-face))
     ;; Disable hl-line, header-line and mode-line in input buffer.
-    (setq-local global-hl-line-overlay nil)
     (setq-local header-line-format nil)
     (setq-local mode-line-format nil)
+    ;; Set input window minimum height.
+    (setq-local window-min-height snails-input-buffer-window-min-height)
     ))
 
 (defun snails-create-tips-buffer ()
@@ -525,10 +590,13 @@ or set it with any string you want."
                      'snails-tips-prefix-backend-face)
         ))
     ;; Disable hl-line, header-line and cursor shape in tips buffer.
-    (setq-local global-hl-line-overlay nil)
     (setq-local header-line-format nil)
     (setq-local mode-line-format nil)
     (setq-local cursor-type nil)
+    ;; Set tips window minimum height.
+    (setq-local window-min-height snails-tips-buffer-window-min-height)
+    ;; Move coursor to the begin of buffer to show all information.
+    (beginning-of-buffer)
     ))
 
 (defun snails-create-content-buffer ()
@@ -556,6 +624,10 @@ or set it with any string you want."
 
 (defun snails-create-frame ()
   "Create popup frame."
+  ;; Record frame before snails start.
+  (setq snails-init-frame (selected-frame))
+
+  ;; Create snails frame.
   (let* ((edges (frame-edges))
          (x (nth 0 edges))
          (y (nth 1 edges))
@@ -613,20 +685,29 @@ or set it with any string you want."
       ;; Split window with one line height of input buffer.
       (split-window (selected-window) (line-pixel-height) nil t)
 
-      ;; Set tips buffer.
-      (other-window 1)
-      (switch-to-buffer snails-tips-buffer)
-      (set-window-margins (selected-window) 1 1)
-      (split-window (selected-window) (line-pixel-height) nil t)
-
       ;; Set content window margin and switch to content buffer.
       (other-window 1)
       (switch-to-buffer snails-content-buffer)
       (set-window-margins (selected-window) 1 1)
 
-      ;; Add monitor callback in input change hook.
+      ;; Save window configuration without prefix tips.
       (other-window 1)
+      (setq snails-frame-window-conf (current-window-configuration))
+
+      ;; Jump to content buffer and split a buffer for prefix tips.
+      (other-window 1)
+      (split-window (selected-window) (* 2 (line-pixel-height)) 'below t)
+
+      ;; Set tips buffer.
+      (switch-to-buffer snails-tips-buffer)
+      (set-window-margins (selected-window) 1 1)
+
+      ;; Goto input buffer, Add monitor callback in input change hook.
+      (other-window 2)
       (add-hook 'after-change-functions 'snails-monitor-input nil t)
+
+      (unless snails-default-show-prefix-tips
+          (snails-toggle-prefix-tips-buffer))
 
       ;; Focus out to hide snails frame on Mac.
       (when (featurep 'cocoa)
@@ -636,6 +717,20 @@ or set it with any string you want."
     ;; `select-frame-set-input-focus' is necessary for gnome-shell DE.
     (make-frame-visible snails-frame)
     (select-frame-set-input-focus snails-frame)))
+
+(defun snails-toggle-prefix-tips-buffer ()
+  "Toggle whether to show prefix tips buffer."
+  (interactive)
+  (let* ((window-conf (current-window-configuration))
+         (snails-content-window (get-buffer-window snails-content-buffer))
+         (snails-content-window-state (window-state-get snails-content-window)))
+    ;; restore saved window configuration
+    (set-window-configuration snails-frame-window-conf)
+    ;; restore snails content window state,
+    ;; content window info need reacquire after restore window configuration.
+    (window-state-put snails-content-window-state (get-buffer-window snails-content-buffer))
+    ;; store newest window configuration
+    (setq snails-frame-window-conf window-conf)))
 
 (defun snails-search (input)
   "Search input with backends."
@@ -743,7 +838,8 @@ or set it with any string you want."
              header-index-start
              header-index-end
              candidate-content-start
-             candidate-content-end)
+             candidate-content-end
+             (candidate-render-icon-func snails-need-render-candidate-icon))
         ;; Render backend result.
         (dolist (candiate-list snails-candiate-list)
           ;; Just render backend result when return candidate is not nil.
@@ -770,10 +866,20 @@ or set it with any string you want."
             (forward-char)
             (setq effective-backend-index (+ effective-backend-index 1))
 
+            (setq candidate-render-icon-func (if candidate-render-icon-func
+                                                 (cdr (assoc "icon" (eval (nth candiate-index snails-backends))))))
+
+            ;; Trick: make icon have same indent.
+            (setq-local tab-width 1)
+
             ;; Render candidate list.
             (dolist (candiate candiate-list)
+              ;; Render candiate icon.
+              (when candidate-render-icon-func
+                (insert (format "%s\t" (funcall candidate-render-icon-func (nth 0 candiate)))))
+
               ;; Render candidate display name.
-              (insert (nth 0 candiate))
+              (insert (string-trim (nth 0 candiate)))
 
               ;; Render candidate real content. ;
               (setq candidate-content-start (point))
@@ -850,7 +956,7 @@ or set it with any string you want."
            (current-symbol (if (or (string-empty-p current-string)
                                    (string-match-p "[[:space:]]" current-string))
                                ;; Get symbol around point if string around point is empty or include spaces.
-                               (thing-at-point 'symbol)
+                               (thing-at-point 'symbol t)
                              ;; Otherwise, get string around point.
                              current-string)))
       (cond ((string-prefix-p "." current-symbol)
@@ -903,50 +1009,29 @@ influence of C1 on the result."
             (round (+ (* x alpha) (* y (- 1 alpha)))))
           (color-values c1) (color-values c2))))
 
-(defun snails-get-theme-colors ()
-  "We need adjust snails's colors when user switch new theme."
-  (let* ((white "#FFFFFF")
-         (black "#000000")
-         (bg-mode (frame-parameter nil 'background-mode))
-         (bg-unspecified (string= (face-background 'default) "unspecified-bg"))
-         (fg-unspecified (string= (face-foreground 'default) "unspecified-fg"))
-         (fg (cond
-              ((and fg-unspecified (eq bg-mode 'dark)) "gray80")
-              ((and fg-unspecified (eq bg-mode 'light)) "gray20")
-              (t (face-foreground 'default))))
-         (bg (cond
-              ((and bg-unspecified (eq bg-mode 'dark)) "gray20")
-              ((and bg-unspecified (eq bg-mode 'light)) "gray80")
-              (t (face-background 'default))))
-         ;; for light themes
-         (bg-dark (snails-color-blend black bg 0.1))
-         (bg-more-dark (snails-color-blend black bg 0.15))
-         (fg-dark (snails-color-blend fg bg-dark 0.7))
-         (fg-more-dark (snails-color-blend black fg 0.2))
-         ;; for dark themes
-         (bg-light (snails-color-blend white bg 0.05))
-         (bg-more-light (snails-color-blend white bg 0.1))
-         (fg-light (snails-color-blend fg bg 0.7))
-         (fg-more-light (snails-color-blend white fg 0.3)))
-    (cond
-     ((eq bg-mode 'dark)
-      (list bg-light fg-dark bg-more-light fg-more-light))
-     (t
-      (list bg-dark fg-light bg-more-dark fg-more-dark)
-      ))))
-
 (defun snails-init-face-with-theme ()
-  (let* ((colors (snails-get-theme-colors))
-         (content-bg-color (nth 0 colors))
-         (input-bg-color (nth 2 colors))
-         (input-fg-color (nth 3 colors)))
-    ;; Set input buffer face.
+  (let* ((bg-mode (frame-parameter nil 'background-mode))
+         (default-background-color (face-background 'default))
+         (default-foreground-color (face-foreground 'default))
+         input-buffer-color
+         content-buffer-color)
+    (cond ((eq bg-mode 'dark)
+           (setq input-buffer-color (snails-color-blend default-background-color "#000000" 0.9))
+           (setq content-buffer-color (snails-color-blend default-background-color "#000000" 0.8)))
+          ((eq bg-mode 'light)
+           (setq input-buffer-color (snails-color-blend default-background-color "#000000" 0.95))
+           (setq content-buffer-color (snails-color-blend default-background-color "#000000" 0.9))))
     (set-face-attribute 'snails-input-buffer-face nil
-                        :background input-bg-color
-                        :foreground input-fg-color)
-    ;; Set coent buffer face.
+                        :foreground default-foreground-color
+                        :background input-buffer-color)
+
     (set-face-attribute 'snails-content-buffer-face nil
-                        :background content-bg-color)
+                        :foreground default-foreground-color
+                        :background content-buffer-color)
+
+    (set-face-attribute 'snails-select-line-face nil
+                        :background default-foreground-color
+                        :foreground default-background-color)
     ))
 
 (defun snails-jump-to-next-item ()
@@ -962,7 +1047,7 @@ influence of C1 on the result."
   ;; Adjust line if reach bottom line.
   (when (and (eobp)
              (snails-empty-line-p))
-    (previous-line 2)))
+    (ignore-errors (previous-line 2))))
 
 (defun snails-jump-to-previous-item ()
   "Select previous candidate item."
@@ -1024,10 +1109,12 @@ influence of C1 on the result."
           ;; Quit frame first.
           (snails-quit)
 
-          ;; Call backend do function.
-          ;; Use `with-selected-frame' make sure command execute in root frame.
-          (with-selected-frame (car (last (frame-list)))
-            (funcall do-func candidate))
+          ;; Switch to init frame.
+          (select-frame snails-init-frame)
+
+          ;; Do.
+          (funcall do-func candidate)
+
           (throw 'backend-do nil)
           )))))
 
@@ -1052,33 +1139,31 @@ influence of C1 on the result."
   "Detect current line whether empty line."
   (= (point-at-eol) (point-at-bol)))
 
-(defun snails-wrap-buffer-icon (buf)
-  "Wrap display name with buffer icon, use for buffer search backend."
+(defun snails-render-web-icon ()
   (if (featurep 'all-the-icons)
-      (format "%s %s"
-              (with-current-buffer buf
-                (all-the-icons-icon-for-buffer))
-              (string-trim-left (buffer-name buf)))
-    (buffer-name buf)))
+      (all-the-icons-faicon "html5"))
+  "")
 
-(defun snails-wrap-file-icon (file)
-  "Wrap display name with file icon, use for file search backend."
+(defun snails-render-buffer-icon (buf)
+  "Render buffer icon."
   (if (featurep 'all-the-icons)
-      (format "%s %s"
-              (all-the-icons-icon-for-file file :height 1)
-              (string-trim-left file))
-    file))
+      (with-current-buffer buf
+        (if (derived-mode-p buf 'eaf-mode)
+            (all-the-icons-faicon "html5")
+          (all-the-icons-icon-for-buffer)))
+    ""))
 
-(defun snails-wrap-file-icon-with-candidate (file candidate &optional no-trim)
-  "Wrap display name with file icon, use for file search backend."
+(defun snails-render-file-icon (file)
+  "Render file icon."
   (if (featurep 'all-the-icons)
-      (format "%s %s"
-              (all-the-icons-icon-for-file (format "hello.%s" (file-name-extension file)) :height 1)
-              (if no-trim
-                  candidate
-                (string-trim-left candidate)
-                ))
-    candidate))
+      (all-the-icons-icon-for-file file :height 1)
+    ""))
+
+(defun snails-render-search-file-icon (file candidate &optional no-trim)
+  "Render search tools file icon."
+  (if (featurep 'all-the-icons)
+      (all-the-icons-icon-for-file (format "hello.%s" (file-name-extension file)) :height 1)
+    ""))
 
 (defun snails-format-line-number (line-number max-line-number)
   "Format line number with same width."
@@ -1187,24 +1272,25 @@ And render result when subprocess finish search."
 
 (defun snails-candidate-get-info ()
   (with-current-buffer snails-content-buffer
-    ;; Goto candidate content overlay position.
-    (goto-char (overlay-start snails-select-line-overlay))
-    (end-of-line)
-    (backward-char)
+    (when (overlayp snails-select-line-overlay)
+      ;; Goto candidate content overlay position.
+      (goto-char (overlay-start snails-select-line-overlay))
+      (end-of-line)
+      (backward-char)
 
-    ;; Pickup candidate content and confirm by corresponding backend.
-    (let ((overlays (overlays-at (point))))
-      (catch 'candidate
-        (while overlays
-          (let ((overlay (car overlays)))
-            ;; Find overlay that face is `snails-candiate-content-face'.
-            (when (eq (overlay-get overlay 'face) 'snails-candiate-content-face)
-              (throw 'candidate
-                     (list
-                      (snails-get-candidate-backend-name (point))
-                      (buffer-substring (overlay-start overlay) (overlay-end overlay))))))
-          (setq overlays (cdr overlays))))
-      )))
+      ;; Pickup candidate content and confirm by corresponding backend.
+      (let ((overlays (overlays-at (point))))
+        (catch 'candidate
+          (while overlays
+            (let ((overlay (car overlays)))
+              ;; Find overlay that face is `snails-candiate-content-face'.
+              (when (eq (overlay-get overlay 'face) 'snails-candiate-content-face)
+                (throw 'candidate
+                       (list
+                        (snails-get-candidate-backend-name (point))
+                        (buffer-substring (overlay-start overlay) (overlay-end overlay))))))
+            (setq overlays (cdr overlays))))
+        ))))
 
 (defun snails-fuz-library-load-p ()
   "Test `fuz' libary is load."
@@ -1239,22 +1325,24 @@ If `fuz' library not found, not sorting.
 `candidates' is candidate list need sort.
 `match-index' is index to fetch match part from candiate, use for calculate sort score.
 `content-index' is index to content part from candiate, use for compare content when fuzz score is same."
-  (when (and (snails-fuz-library-load-p)
-             candidates)
-    (let ((fuzzy-re (snails-build-fuzzy-regex input))
-          retval)
+  (if (and (snails-fuz-library-load-p)
+           candidates)
+      (let ((fuzzy-re (snails-build-fuzzy-regex input))
+            retval)
 
-      (while candidates
-        (when (string-match-p fuzzy-re (nth match-index (car candidates)))
-          (push (pop candidates) retval)))
+        (while candidates
+          (when (string-match-p fuzzy-re (nth match-index (car candidates)))
+            (push (pop candidates) retval)))
 
-      (cl-sort (mapcar (lambda (it)
-                         (cons it (fuz-calc-score-skim input (nth match-index it))))
-                       retval)
-               (pcase-lambda (`(,candidate1 . ,fuzz-score1) `(,candidate2 . ,fuzz-score2))
-                 (if (equal fuzz-score1 fuzz-score2)
-                     (string> (nth content-index candidate1) (nth content-index candidate2))
-                   (< fuzz-score1 fuzz-score2)))))))
+        (mapcar #'car
+                (cl-sort (mapcar (lambda (it)
+                                   (cons it (fuz-calc-score-skim input (nth match-index it))))
+                                 retval)
+                         (pcase-lambda (`(,candidate1 . ,fuzz-score1) `(,candidate2 . ,fuzz-score2))
+                           (if (equal fuzz-score1 fuzz-score2)
+                               (string> (nth content-index candidate1) (nth content-index candidate2))
+                             (> fuzz-score1 fuzz-score2))))))
+    candidates))
 
 (defun snails-match-input-p (input candidate-content)
   "If `fuz' library load, use fuzz match algorithm.
@@ -1266,18 +1354,10 @@ If `fuz' not found, use normal match algorithm."
 (defun snails-start-buffer-dir ()
   "Get directory of `snails-start-buffer'.
 
-If `snails-start-buffer' is nil, get path of HOME.
-If `snails-start-buffer' is dired-mode, get path by `dired-directory'.
-Otherwise get path by `buffer-file-name'."
-  (cond ((not snails-start-buffer)
-         (expand-file-name "~"))
-        ((equal 'dired-mode (with-current-buffer snails-start-buffer major-mode))
-         (with-current-buffer snails-start-buffer
-           (expand-file-name dired-directory)))
-        ((not (buffer-file-name snails-start-buffer))
-         (expand-file-name "~"))
-        (t
-         (file-name-directory (buffer-file-name snails-start-buffer)))))
+If `snails-start-buffer' is nil, get path of HOME."
+  (if snails-start-buffer
+        snails-start-buffer-dir-path
+      (expand-file-name "~")))
 
 (defun snails-pick-search-info-from-input (input)
   "If nothing after @ , return HOME path and search string.
@@ -1335,13 +1415,22 @@ Otherwise return nil."
                 (apply orig args))
               ))
 
+(advice-add 'delete-frame
+            :around
+            (lambda (orig &optional frame force)
+              "Makes snails-frame undeletable. unless argument force is `t'"
+              (if (or (and snails-frame (equal snails-frame frame) (null force))
+                      (and (null frame) (snails-frame-is-active-p) (null force)))
+                  nil
+                (funcall orig frame force))))
+
 (defun snails-monitor-minibuffer-enter ()
   (when (snails-frame-is-visible-p)
     (snails-quit)))
 
 (add-hook 'minibuffer-setup-hook 'snails-monitor-minibuffer-enter)
 
-(cl-defmacro snails-create-sync-backend (&rest args &key name candidate-filter candiate-do)
+(cl-defmacro snails-create-sync-backend (&rest args &key name candidate-filter candidate-icon candidate-do)
   "Macro to create sync backend code.
 
 `name' is backend name, such 'Foo Bar'.
@@ -1364,11 +1453,12 @@ Otherwise return nil."
        (setq ,backend-name
              '(("name" . ,name)
                ("search" . ,search-function)
-               ("do" . ,candiate-do)
+               ("icon" . ,candidate-icon)
+               ("do" . ,candidate-do)
                )
              ))))
 
-(cl-defmacro snails-create-async-backend (&rest args &key name build-command candidate-filter candiate-do)
+(cl-defmacro snails-create-async-backend (&rest args &key name build-command candidate-filter candidate-icon candidate-do)
   "Macro to create sync backend code.
 
 `name' is backend name, such 'Foo Bar'.
@@ -1395,7 +1485,8 @@ Otherwise return nil."
        (setq ,backend-name
              '(("name" . ,name)
                ("search" . ,search-function)
-               ("do" . ,candiate-do)
+               ("icon" . ,candidate-icon)
+               ("do" . ,candidate-do)
                )
              ))))
 

@@ -79,6 +79,7 @@ When you customize the search backends, snails won't filter search result with i
 | snails-backend-fd                  | Use fd search files in current project, need install ```fd```                                                                             |
 | snails-backend-mdfind              | Use mdfind search files in local disk, only Mac                                                                                           |
 | snails-backend-everything          | Use everything search files in local disk, only Windows, need install ```everything```                                                    |
+| snails-backend-fasd                | Use fasd to search most visit directory , need install ```fasd```                                                                         |
 | snails-backend-command             | Search command                                                                                                                            |
 | snails-backend-eaf-pdf-table       | Search table of contents of PDF file, united [EAF](https://github.com/manateelazycat/emacs-application-framework) technology              |
 | snails-backend-eaf-browser-history | Search history of browser, united [EAF](https://github.com/manateelazycat/emacs-application-framework) technology, need install ```fzf``` |
@@ -106,6 +107,8 @@ To install fuz.el , please follow below steps:
 | C-p         | Select previous candidate |
 | M-n         | Select next candidate     |
 | M-p         | Select previous candidate |
+| M-,         | Select next candidate     |
+| M-.         | Select previous candidate |
 | C-v         | Select next backend       |
 | M-v         | Select previous backend   |
 | M-j         | Select next backend       |
@@ -163,11 +166,16 @@ Let's take the example of ```snails-backend-recentf``` plugin:
      (dolist (file recentf-list)
        (when (or
               (string-equal input "")
-              (string-match-p (regexp-quote input) file))
-         (snails-add-candiate 'candidates (snails-wrap-file-icon file) file)))
+              (snails-match-input-p input file))
+         (snails-add-candiate 'candidates file file)))
+     (snails-sort-candidates input candidates 1 1)
      candidates))
 
- :candiate-do
+ :candidate-icon
+ (lambda (candidate)
+   (snails-render-file-icon candidate))
+
+ :candidate-do
  (lambda (candidate)
    (find-file candidate)))
 
@@ -177,6 +185,8 @@ Let's take the example of ```snails-backend-recentf``` plugin:
 * :name parameter is the name of your plugin, and it must be unique. Snails distinguishes the results of different plugins based on the plugin name.
 
 * :candidate-filter is the filter function. ```input``` is user input content, and you need to return a candidate list to the snails framework, where elements of the candidate list are formatted as ```(list display-name candidate-content)```. The first candidate element ```display-name``` is the string presented to the user, and the second candidate element ```candidate-content``` is the string passed to the ```candidate-do``` callback below. If nothing was found, please return nil, and snails will hide the backend result.
+
+* :candidate-icon is function to render candidate icon, if you don't need icon, just ignore this.
 
 * :candidate-do is the function to confirm the candidate, and it can be any code you want.
 
@@ -196,16 +206,20 @@ Let's take the example of ```snails-backend-mdfind``` plugin:
  (lambda (input)
    (when (and (featurep 'cocoa)
               (> (length input) 5))
-     (list "mdfind" (format "'%s'" input))))
+     (list "mdfind" "-name" (format "'%s'" input))))
 
  :candidate-filter
  (lambda (candidate-list)
    (let (candidates)
      (dolist (candidate candidate-list)
-       (snails-add-candiate 'candidates (snails-wrap-file-icon candidate) candidate))
+       (snails-add-candiate 'candidates candidate candidate))
      candidates))
 
- :candiate-do
+ :candidate-icon
+ (lambda (candidate)
+   (snails-render-file-icon candidate))
+
+ :candidate-do
  (lambda (candidate)
    (find-file candidate)))
 
@@ -217,6 +231,8 @@ Let's take the example of ```snails-backend-mdfind``` plugin:
 * :build-command is the function to build a command with user input. ```input``` is the user input content, and you need to  return a list of strings where the first string is a shell command, and the rest of the strings are arguments to pass to the shell command. If you don't want the search to continue, please return nil.
 
 * :candidate-filter is the filter function, ```candidate-list``` is a list of strings returned by the shell command, and you need to return a candidate list to the snails framework, where elements of the candidate list are formatted as ```(list display-name candidate-content)```. The first candidate element ```display-name``` is the string presented to the user, and the second candidate element ```candidate-content``` is the string passed to the ```candidate-do``` callback below. If nothing was found, please return nil, and snails will hide the backend result.
+
+* :candidate-icon is function to render candidate icon, if you don't need icon, just ignore this.
 
 * :candidate-do is the function to confirm the candiate, and it can be any code you want.
 

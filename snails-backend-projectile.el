@@ -103,20 +103,24 @@
  :candidate-filter
  (lambda (input)
    (let ((candidates)
+         (project-root (snails-backend-projectile-project-root))
          (project-files (snails-backend-projectile-candidates)))
      (when project-files
        (dolist (file project-files)
          (when (or
                 (string-equal input "")
                 (snails-match-input-p input file))
-           (snails-add-candiate 'candidates (snails-wrap-file-icon file) file))))
-     (snails-sort-candidates input candidates 1 1)
-     candidates))
+           (setq file-path (expand-file-name file project-root))
+           (snails-add-candiate 'candidates file file-path))))
+     (snails-sort-candidates input candidates 1 1)))
 
- :candiate-do
+ :candidate-icon
  (lambda (candidate)
-   (let ((project-root (snails-backend-projectile-project-root)))
-     (find-file (expand-file-name candidate project-root)))))
+   (snails-render-file-icon candidate))
+
+ :candidate-do
+ (lambda (candidate)
+   (find-file candidate)))
 
 (provide 'snails-backend-projectile)
 
